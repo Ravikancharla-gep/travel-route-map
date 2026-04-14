@@ -106,6 +106,8 @@ The repo includes `netlify.toml`:
 
 In the Netlify UI, set the same [environment variables](https://docs.netlify.com/environment-variables/overview/) as in the frontend `.env`, using the `VITE_` prefix. Point `VITE_API_URL` at your **deployed API** URL (not `localhost`).
 
+**Manual deploy (drag-and-drop `dist`):** Netlify does not inject env vars into an uploaded folder. This repo includes **`.env.production`**, which Vite loads automatically when you run `npm run build`, so the built bundle contains the public API base URL. After changing that file, run `npm run build` again, then upload the new `dist` folder.
+
 Netlify only hosts static files; the Express server in `server/` must be deployed separately (e.g. Render, Railway, Fly.io, Heroku) with its own `MONGODB_URI`, `JWT_SECRET`, and CORS settings for your site origin.
 
 ## Project structure
@@ -115,6 +117,7 @@ Netlify only hosts static files; the Express server in `server/` must be deploye
 ├── server/              # Express API + MongoDB
 ├── public/              # Static assets
 ├── dist/                # Production build (generated, not committed)
+├── .env.production      # Production Vite vars (e.g. VITE_API_URL) used by `npm run build`
 ├── vite.config.ts
 ├── netlify.toml         # Netlify build & SPA redirect
 └── package.json
