@@ -106,7 +106,7 @@ function MapViewsSlideControl({
       <button
         type="button"
         aria-haspopup="true"
-        aria-expanded={open}
+        aria-expanded={open ? 'true' : 'false'}
         aria-controls="map-views-strip"
         className={`flex shrink-0 items-center gap-2 p-3 text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent ${MAP_TOOLBAR_MIN_H} ${
           open ? 'bg-black/35' : ''
@@ -597,6 +597,8 @@ interface GoogleMapWrapperProps {
   onFitBoundsComplete: () => void;
   markerRefs: React.MutableRefObject<{ [key: string]: any }>;
   onLegTransportChange?: (toPlaceId: string, transport: TransportMode) => void;
+  onStreetViewOpenChange?: (open: boolean) => void;
+  hideViewsControl?: boolean;
 }
 
 const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
@@ -616,6 +618,8 @@ const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
   onFitBoundsComplete,
   markerRefs,
   onLegTransportChange,
+  onStreetViewOpenChange,
+  hideViewsControl = false,
 }) => {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -625,8 +629,7 @@ const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
   const [initialZoom] = useState<number>(zoom);
   /** App-controlled map type so Terrain / Satellite stay visible above other map chrome (native control can be hard to see). */
   const [mapTypeIdUi, setMapTypeIdUi] = useState<string>('roadmap');
-  /** Pegman / fullscreen Street View — hide custom Views and map pegman so they don’t sit on top of live view. */
-  const [streetViewOpen, setStreetViewOpen] = useState(false);
+  const [isStreetViewOpen, setIsStreetViewOpen] = useState(false);
 
   /** GoogleMap (PureComponent) re-registers every listener/updater when any prop reference changes — unstable App callbacks were causing huge work on hover/zoom. */
   const onMapClickRef = useRef(onMapClick);
@@ -669,7 +672,7 @@ const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
       zoomControl: false,
       mapTypeControl: false,
       scaleControl: false,
-      streetViewControl: !streetViewOpen,
+      streetViewControl: true,
       streetViewControlOptions: {
         position: bottomCenter,
       },
@@ -686,16 +689,17 @@ const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
           stylers: [{ visibility: 'off' }],
         },
       ],
-      scrollwheel: !streetViewOpen,
+      scrollwheel: true,
       mapTypeId: mapTypeIdUi,
     };
-  }, [mapTypeIdUi, streetViewOpen]);
+  }, [mapTypeIdUi]);
 
-  // Load Google Maps
+  // Load Google Maps (`weekly` can change behavior overnight; `quarterly` reduces surprise breakages e.g. Street View).
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: apiKey,
     libraries,
+    version: 'quarterly',
     // Prefer English map labels and controls (reduces local-script regional names where the API supports it).
     language: 'en',
   });
@@ -727,23 +731,45 @@ const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
     if (!map || typeof google === 'undefined' || !google.maps) return;
     const panorama = map.getStreetView();
     const streetViewUi: google.maps.StreetViewPanoramaOptions = {
-      disableDefaultUI: true,
+      disableDefaultUI: false,
       enableCloseButton: true,
       clickToGo: true,
-      scrollwheel: false,
+      scrollwheel: true,
+      disableDoubleClickZoom: false,
+      zoomControl: true,
+      panControl: true,
+      fullscreenControl: true,
+      addressControl: true,
+      motionTrackingControl: true,
+    };
+    /** Street View WebGL often renders black until layout is settled; resizing nudges the canvas to correct dimensions. */
+    const nudgeStreetViewLayout = () => {
+      google.maps.event.trigger(map, 'resize');
+      google.maps.event.trigger(panorama, 'resize');
     };
     const sync = () => {
       const visible = panorama.getVisible();
-      setStreetViewOpen(visible);
-      if (visible) panorama.setOptions(streetViewUi);
+      setIsStreetViewOpen(visible);
+      onStreetViewOpenChange?.(visible);
+      if (visible) {
+        panorama.setOptions(streetViewUi);
+        requestAnimationFrame(nudgeStreetViewLayout);
+        window.setTimeout(nudgeStreetViewLayout, 100);
+      }
     };
     panorama.setOptions(streetViewUi);
     sync();
     const listener = panorama.addListener('visible_changed', sync);
-    return () => {
-      google.maps.event.removeListener(listener);
+    const onWindowResize = () => {
+      if (panorama.getVisible()) nudgeStreetViewLayout();
     };
-  }, [map]);
+    window.addEventListener('resize', onWindowResize);
+    return () => {
+      window.removeEventListener('resize', onWindowResize);
+      google.maps.event.removeListener(listener);
+      onStreetViewOpenChange?.(false);
+    };
+  }, [map, onStreetViewOpenChange]);
 
   // Track if we've already fitted bounds to prevent unnecessary repositioning
   const hasFittedRef = useRef(false);
@@ -877,7 +903,7 @@ const GoogleMapWrapper: React.FC<GoogleMapWrapperProps> = ({
       ) : null}
       </GoogleMap>
 
-      {!streetViewOpen ? (
+      {!isStreetViewOpen && !hideViewsControl ? (
         <div
           className="pointer-events-auto absolute left-[5.25rem] top-4 z-[10050]"
           onClick={(e) => e.stopPropagation()}

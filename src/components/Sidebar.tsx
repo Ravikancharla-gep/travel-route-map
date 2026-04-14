@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Trash2, Edit2, ChevronLeft, ChevronRight, Camera, GripVertical } from 'lucide-react';
+import { Trash2, Edit2, ChevronLeft, ChevronRight, Camera } from 'lucide-react';
 import type { TripList } from '../types';
 import { compressImage } from '../utils/imageCompression';
 
@@ -46,6 +46,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onSelectPlace,
   onViewPlace,
   onDeletePlace,
+  onBackToLists,
   onTogglePlaceNumbering,
   onHoverPlace,
   onToggleShowAllTrips,
@@ -73,6 +74,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [sidebarShowAllLists, setSidebarShowAllLists] = useState(true);
   /** Main list scroll area — reset to top when opening a place so the bar doesn’t jump to the bottom (browser scroll anchoring / focus). */
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
+  const prevSidebarShowAllListsRef = useRef<boolean | null>(null);
+
+  // Keep map mode in sync with sidebar "All lists" picker mode.
+  useEffect(() => {
+    const wasAllLists = prevSidebarShowAllListsRef.current;
+    if (sidebarShowAllLists && (wasAllLists === null || wasAllLists === false)) {
+      onBackToLists?.();
+    }
+    prevSidebarShowAllListsRef.current = sidebarShowAllLists;
+  }, [sidebarShowAllLists, onBackToLists]);
 
   const scrollSidebarListToTop = () => {
     const el = sidebarScrollRef.current;
@@ -218,6 +229,18 @@ const Sidebar: React.FC<SidebarProps> = ({
     sidebarShowAllLists || tripLists.length <= 1 || !selectedTripStillPresent;
 
   const DEFAULT_NEW_LIST_NAME = 'New list';
+  const getDraggedTripId = (dt: DataTransfer): string => {
+    const tripId = dt.getData('text/trip-id');
+    if (tripId) return tripId;
+    const plain = dt.getData('text/plain');
+    return plain.startsWith('trip:') ? plain.slice(5) : '';
+  };
+  const getDraggedPlaceId = (dt: DataTransfer): string => {
+    const placeId = dt.getData('text/place-id');
+    if (placeId) return placeId;
+    const plain = dt.getData('text/plain');
+    return plain.startsWith('place:') ? plain.slice(6) : '';
+  };
 
   return (
     <div className="relative z-10 flex h-full min-h-0 w-full flex-col bg-white shadow-lg dark:bg-gray-800 dark:text-gray-100">
@@ -366,7 +389,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   setEditingName(DEFAULT_NEW_LIST_NAME);
                   setSidebarShowAllLists(false);
                 }}
-                className="shrink-0 rounded-lg bg-gradient-to-r from-teal-500 to-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:from-teal-600 hover:to-emerald-700 hover:shadow-lg active:opacity-95"
+                className="shrink-0 rounded-lg border border-white/50 bg-gradient-to-r from-teal-500 to-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:border-white/35 hover:from-teal-600 hover:to-emerald-700 hover:shadow-lg active:opacity-95"
               >
                 + Add List
               </motion.button>
@@ -393,7 +416,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           onDrop={(e) => {
             // Handle container-level drop only near the bottom of the list.
             // Prevent accidental "drop to end" when pointer is near the top.
-            const sourceId = e.dataTransfer.getData('text/trip-id');
+            const sourceId = getDraggedTripId(e.dataTransfer);
             if (sourceId && draggedTripId === sourceId && onReorderTrip) {
               e.preventDefault();
               e.stopPropagation();
@@ -425,7 +448,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 if (e.dataTransfer.types.includes('Files')) return;
                 e.preventDefault();
                 e.stopPropagation();
-                const sourceId = e.dataTransfer.getData('text/trip-id');
+                const sourceId = getDraggedTripId(e.dataTransfer);
                 if (sourceId && draggedTripId === sourceId && onReorderTrip) {
                   onReorderTrip(sourceId, 0);
                 }
@@ -472,7 +495,27 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {showDropIndicatorAbove && (
                   <div className="h-1 bg-purple-400 dark:bg-purple-500 rounded-full mx-2 my-1 animate-pulse" />
                 )}
-                <div 
+                <div
+                  draggable={sidebarShowAllLists && tripLists.length > 1}
+                  onDragStart={(e) => {
+                    if (!(sidebarShowAllLists && tripLists.length > 1)) return;
+                    const target = e.target as HTMLElement;
+                    if (target.closest('button, input, textarea, label')) {
+                      e.preventDefault();
+                      return;
+                    }
+                    e.stopPropagation();
+                    e.dataTransfer.setData('text/trip-id', trip.id);
+                    e.dataTransfer.setData('text/plain', `trip:${trip.id}`);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDraggedTripId(trip.id);
+                  }}
+                  onDragEnd={(e) => {
+                    if (!(sidebarShowAllLists && tripLists.length > 1)) return;
+                    e.stopPropagation();
+                    setDraggedTripId(null);
+                    setDragOverIndex(null);
+                  }}
                   onDragEnter={(e) => {
                     if (draggedTripId && draggedTripId !== trip.id && !e.dataTransfer.types.includes('Files')) {
                       e.preventDefault();
@@ -547,7 +590,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     
                     e.preventDefault();
                     e.stopPropagation();
-                    const sourceId = e.dataTransfer.getData('text/trip-id');
+                    const sourceId = getDraggedTripId(e.dataTransfer);
                     if (sourceId && draggedTripId === sourceId && onReorderTrip) {
                       // Derive target from current cursor first to avoid stale dragOverIndex.
                       let targetIndex: number;
@@ -631,7 +674,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                     }
                     // For trip-id drops, let it bubble up to parent
                   }}
-                  className={`p-3 rounded-lg ${sidebarShowAllLists || !selectedTripStillPresent ? 'cursor-pointer' : 'cursor-default'} ${draggedPlaceId ? '' : 'transition-all duration-200'} relative overflow-hidden border opacity-100 ${
+                  className={`p-3 rounded-lg ${
+                    sidebarShowAllLists && tripLists.length > 1
+                      ? 'cursor-grab active:cursor-grabbing'
+                      : sidebarShowAllLists || !selectedTripStillPresent
+                        ? 'cursor-pointer'
+                        : 'cursor-default'
+                  } ${draggedPlaceId ? '' : 'transition-all duration-200'} relative overflow-hidden border opacity-100 select-none ${
                     hasPhotoBackground
                       ? isActiveTrip
                         ? 'border-transparent shadow-[inset_0_0_0_2px_rgba(255,255,255,0.55)] dark:shadow-[inset_0_0_0_2px_rgba(255,255,255,0.35)]'
@@ -678,33 +727,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <div className="relative z-10">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
-                      {sidebarShowAllLists && tripLists.length > 1 && (
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Drag to reorder ${trip.name}`}
-                          draggable
-                          onDragStart={(e) => {
-                            e.stopPropagation();
-                            e.dataTransfer.setData('text/trip-id', trip.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                            setDraggedTripId(trip.id);
-                          }}
-                          onDragEnd={(e) => {
-                            e.stopPropagation();
-                            setDraggedTripId(null);
-                            setDragOverIndex(null);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className={`flex-shrink-0 cursor-grab rounded p-0.5 active:cursor-grabbing touch-none outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${
-                            hasPhotoBackground
-                              ? 'text-white/90 hover:bg-white/15'
-                              : 'text-gray-400 hover:bg-gray-200 dark:text-gray-500 dark:hover:bg-gray-600'
-                          }`}
-                        >
-                          <GripVertical size={18} aria-hidden />
-                        </span>
-                      )}
                       <div
                         className="w-4 h-4 rounded-full flex-shrink-0"
                         style={{ backgroundColor: trip.color }}
@@ -884,10 +906,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                         if (!draggedPlaceIdRef.current || e.dataTransfer.types.includes('Files')) {
                           return;
                         }
-                        const target = e.target as HTMLElement;
-                        if (target.closest('[draggable="true"]')) {
-                          return;
-                        }
                         e.preventDefault();
                         e.stopPropagation();
                         e.dataTransfer.dropEffect = 'move';
@@ -898,11 +916,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         }
                       }}
                       onDrop={(e) => {
-                        const target = e.target as HTMLElement;
-                        if (target.closest('[draggable="true"]')) {
-                          return;
-                        }
-                        const sourceId = e.dataTransfer.getData('text/place-id');
+                        const sourceId = getDraggedPlaceId(e.dataTransfer);
                         if (
                           sourceId &&
                           draggedPlaceIdRef.current === sourceId &&
@@ -941,7 +955,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             if (e.dataTransfer.types.includes('Files')) return;
                             e.preventDefault();
                             e.stopPropagation();
-                            const sourceId = e.dataTransfer.getData('text/place-id');
+                            const sourceId = getDraggedPlaceId(e.dataTransfer);
                             if (sourceId && draggedPlaceIdRef.current === sourceId && onReorderPlace) {
                               onReorderPlace(sourceId, 0);
                             }
@@ -973,16 +987,43 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div className="h-0.5 bg-purple-400 dark:bg-purple-500 rounded-full mx-4 my-1 animate-pulse" />
                           )}
                           <div
-                            className={`flex items-center justify-between gap-2 text-sm opacity-100 rounded-md px-1.5 py-1 -mx-1 transition-colors ${
+                            draggable={places.length > 1}
+                            className={`flex items-center justify-between gap-2 text-sm opacity-100 rounded-md px-1.5 py-1 -mx-1 transition-colors select-none ${
                               isPlaceSelected
                                 ? 'bg-gray-100 dark:bg-gray-700/90'
                                 : 'hover:bg-gray-50 dark:hover:bg-gray-700/45'
                             }`}
                             style={{
-                              cursor: 'pointer',
+                              cursor:
+                                places.length > 1
+                                  ? draggedPlaceId === place.id
+                                    ? 'grabbing'
+                                    : 'grab'
+                                  : 'pointer',
                               boxShadow: isPlaceSelected
                                 ? `inset 2px 0 0 0 ${trip.color}`
                                 : undefined,
+                            }}
+                            onDragStart={(e) => {
+                              if (!(places.length > 1)) return;
+                              const target = e.target as HTMLElement;
+                              if (target.closest('button, input, textarea, label')) {
+                                e.preventDefault();
+                                return;
+                              }
+                              e.stopPropagation();
+                              e.dataTransfer.setData('text/place-id', place.id);
+                              e.dataTransfer.setData('text/plain', `place:${place.id}`);
+                              e.dataTransfer.effectAllowed = 'move';
+                              draggedPlaceIdRef.current = place.id;
+                              setDraggedPlaceId(place.id);
+                            }}
+                            onDragEnd={(e) => {
+                              if (!(places.length > 1)) return;
+                              e.stopPropagation();
+                              draggedPlaceIdRef.current = null;
+                              setDraggedPlaceId(null);
+                              setDragOverPlaceIndex(null);
                             }}
                             onDragEnter={(e) => {
                               const dragId = draggedPlaceIdRef.current;
@@ -1054,7 +1095,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                               e.preventDefault();
                               e.stopPropagation();
 
-                              const sourceId = e.dataTransfer.getData('text/place-id');
+                              const sourceId = getDraggedPlaceId(e.dataTransfer);
                               if (
                                 sourceId &&
                                 draggedPlaceIdRef.current === sourceId &&
@@ -1121,38 +1162,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                             className="flex items-center gap-2 select-none min-w-0 flex-1"
                             style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
                           >
-                            {places.length > 1 && (
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                aria-label={`Drag to reorder ${place.name}`}
-                                draggable
-                                onDragStart={(e) => {
-                                  e.stopPropagation();
-                                  e.dataTransfer.setData('text/place-id', place.id);
-                                  e.dataTransfer.effectAllowed = 'move';
-                                  draggedPlaceIdRef.current = place.id;
-                                  setDraggedPlaceId(place.id);
-                                }}
-                                onDragEnd={(e) => {
-                                  e.stopPropagation();
-                                  draggedPlaceIdRef.current = null;
-                                  setDraggedPlaceId(null);
-                                  setDragOverPlaceIndex(null);
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex-shrink-0 cursor-grab rounded p-0.5 text-gray-400 hover:bg-gray-200 active:cursor-grabbing dark:text-gray-500 dark:hover:bg-gray-600 outline-none focus-visible:ring-2 focus-visible:ring-teal-500 touch-none"
-                              >
-                                <GripVertical size={16} aria-hidden />
-                              </span>
-                            )}
                             {/* Number badge or dot for intermediate - clickable to toggle */}
                             {displayNumber !== undefined ? (
                               <span
-                                onMouseDown={(e) => {
-                                  // Prevent drag from starting when clicking the number badge
-                                  e.stopPropagation();
-                                }}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   e.preventDefault();
@@ -1168,10 +1180,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                               </span>
                             ) : (
                               <span
-                                onMouseDown={(e) => {
-                                  // Prevent drag from starting when clicking the dot
-                                  e.stopPropagation();
-                                }}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   e.preventDefault();

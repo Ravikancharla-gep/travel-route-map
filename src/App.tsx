@@ -280,13 +280,21 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(320); // Sidebar width in pixels
   const [isResizing, setIsResizing] = useState(false);
   const [fitBoundsActive, setFitBoundsActive] = useState(false);
-  const [showAllTrips, setShowAllTrips] = useState(true); // Default: all trips on map (matches "All lists" after refresh)
+  const [showAllTrips, setShowAllTrips] = useState(false); // Default: do not auto-enable India "all trips" dots on refresh
   /** Second India-map press: map shows no markers (not the selected list). */
   const [hideAllMapMarkers, setHideAllMapMarkers] = useState(false);
   /** Mid-leg transport circles on the map (train/bus/etc.); lines stay visible when off. */
   const [showTransportLegMarkers, setShowTransportLegMarkers] = useState(false);
   const [chatbotOpen, setChatbotOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [isStreetViewOpen, setIsStreetViewOpen] = useState(false);
+
+  useEffect(() => {
+    if (isStreetViewOpen) {
+      setIsProfileDropdownOpen(false);
+      setChatbotOpen(false);
+    }
+  }, [isStreetViewOpen]);
 
   /** Same pulse as the map "fit" control — GoogleMapWrapper reacts on false→true. */
   const pulseFitBounds = () => {
@@ -764,102 +772,104 @@ function App() {
         onLogin={handleLogin}
       />
 
-      {/* Login/User Button - Top right corner */}
-      <div className="fixed top-4 right-4 z-[9999]">
-        {user ? (
-          <>
-            {/* Backdrop - Only show when dropdown is open */}
-            <AnimatePresence>
-              {isProfileDropdownOpen && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setIsProfileDropdownOpen(false)}
-                  className="fixed inset-0 z-[9998]"
-                />
-              )}
-            </AnimatePresence>
+      {/* Login/User Button - Top right corner (hidden in Street View and during app-state loading overlay) */}
+      {!isStreetViewOpen && !isLoadingSavedAppState ? (
+        <div className="fixed top-4 right-4 z-[9999]">
+          {user ? (
+            <>
+              {/* Backdrop - Only show when dropdown is open */}
+              <AnimatePresence>
+                {isProfileDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setIsProfileDropdownOpen(false)}
+                    className="fixed inset-0 z-[9998]"
+                  />
+                )}
+              </AnimatePresence>
 
-            {/* Vertical Stack - Profile pic and Logout button (cylinder shape) */}
-            <div className="relative flex flex-col gap-2 z-[9999]">
-                {/* Profile Button with Google One-style multi-color border */}
-                <motion.button
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
-                  className="relative w-12 h-12 rounded-full shadow-lg hover:shadow-xl transition-all duration-200"
-                  style={{
-                    padding: '2px',
-                    background: 'conic-gradient(from 0deg, #EA4335 0deg, #4285F4 90deg, #34A853 180deg, #FBBC05 270deg, #EA4335 360deg)',
-                  }}
-                >
-                  {/* Inner circle with profile picture */}
-                  <div className="w-full h-full rounded-full overflow-hidden bg-white dark:bg-gray-800 relative">
-                    {/*
-                      Google avatar URLs (lh3.googleusercontent.com) often 403/block unless Referer is omitted.
-                      referrerPolicy="no-referrer" fixes intermittent missing photos. Eager load — avatar is always visible.
-                    */}
-                    {user.picture && !profileImageError ? (
-                      <img
-                        key={user.picture}
-                        src={user.picture}
-                        alt={user.name || user.email}
-                        referrerPolicy="no-referrer"
-                        loading="eager"
-                        decoding="async"
-                        fetchPriority="high"
-                        className="absolute inset-0 z-10 h-full w-full object-cover"
-                        onError={() => {
-                          console.error('Failed to load profile picture:', user.picture);
-                          setProfileImageError(true);
-                        }}
-                      />
-                    ) : null}
-                    {/* Fallback: no URL or failed to load */}
-                    <div
-                      className={`absolute inset-0 z-0 flex items-center justify-center transition-opacity duration-200 ${
-                        !user.picture || profileImageError ? 'opacity-100' : 'opacity-0 pointer-events-none'
-                      }`}
-                    >
-                      <User size={24} className="text-gray-600 dark:text-gray-400" />
+              {/* Vertical Stack - Profile pic and Logout button (cylinder shape) */}
+              <div className="relative flex flex-col gap-2 z-[9999]">
+                  {/* Profile Button with Google One-style multi-color border */}
+                  <motion.button
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                    className="relative w-12 h-12 rounded-full shadow-lg hover:shadow-xl transition-all duration-200"
+                    style={{
+                      padding: '2px',
+                      background: 'conic-gradient(from 0deg, #EA4335 0deg, #4285F4 90deg, #34A853 180deg, #FBBC05 270deg, #EA4335 360deg)',
+                    }}
+                  >
+                    {/* Inner circle with profile picture */}
+                    <div className="w-full h-full rounded-full overflow-hidden bg-white dark:bg-gray-800 relative">
+                      {/*
+                        Google avatar URLs (lh3.googleusercontent.com) often 403/block unless Referer is omitted.
+                        referrerPolicy="no-referrer" fixes intermittent missing photos. Eager load — avatar is always visible.
+                      */}
+                      {user.picture && !profileImageError ? (
+                        <img
+                          key={user.picture}
+                          src={user.picture}
+                          alt={user.name || user.email}
+                          referrerPolicy="no-referrer"
+                          loading="eager"
+                          decoding="async"
+                          fetchPriority="high"
+                          className="absolute inset-0 z-10 h-full w-full object-cover"
+                          onError={() => {
+                            console.error('Failed to load profile picture:', user.picture);
+                            setProfileImageError(true);
+                          }}
+                        />
+                      ) : null}
+                      {/* Fallback: no URL or failed to load */}
+                      <div
+                        className={`absolute inset-0 z-0 flex items-center justify-center transition-opacity duration-200 ${
+                          !user.picture || profileImageError ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                        }`}
+                      >
+                        <User size={24} className="text-gray-600 dark:text-gray-400" />
+                      </div>
                     </div>
-                  </div>
-                </motion.button>
+                  </motion.button>
 
-                {/* Logout Button - Circular, below profile pic (slides down) */}
-                <AnimatePresence>
-                  {isProfileDropdownOpen && (
-                    <motion.button
-                      initial={{ scale: 0, opacity: 0, y: -10 }}
-                      animate={{ scale: 1, opacity: 1, y: 0 }}
-                      exit={{ scale: 0, opacity: 0, y: -10 }}
-                      transition={{ duration: 0.1, ease: 'easeOut' }}
-                      onClick={() => {
-                        setIsProfileDropdownOpen(false);
-                        handleLogout();
-                      }}
-                      className="w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center"
-                      title="Logout"
-                    >
-                      <LogOut size={20} className="text-white" />
-                    </motion.button>
-                  )}
-                </AnimatePresence>
-              </div>
-          </>
-        ) : (
-          <motion.button
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            onClick={() => setIsAuthModalOpen(true)}
-            className="flex items-center gap-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg shadow-lg px-4 py-2 transition-colors"
-          >
-            <LogIn size={18} />
-            <span className="font-medium">Login</span>
-          </motion.button>
-        )}
-      </div>
+                  {/* Logout Button - Circular, below profile pic (slides down) */}
+                  <AnimatePresence>
+                    {isProfileDropdownOpen && (
+                      <motion.button
+                        initial={{ scale: 0, opacity: 0, y: -10 }}
+                        animate={{ scale: 1, opacity: 1, y: 0 }}
+                        exit={{ scale: 0, opacity: 0, y: -10 }}
+                        transition={{ duration: 0.1, ease: 'easeOut' }}
+                        onClick={() => {
+                          setIsProfileDropdownOpen(false);
+                          handleLogout();
+                        }}
+                        className="w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center"
+                        title="Logout"
+                      >
+                        <LogOut size={20} className="text-white" />
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+                </div>
+            </>
+          ) : (
+            <motion.button
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              onClick={() => setIsAuthModalOpen(true)}
+              className="flex items-center gap-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg shadow-lg px-4 py-2 transition-colors"
+            >
+              <LogIn size={18} />
+              <span className="font-medium">Login</span>
+            </motion.button>
+          )}
+        </div>
+      ) : null}
 
       {/* Sidebar */}
       <div
@@ -901,6 +911,14 @@ function App() {
           onViewPlace={(placeId) => {
             setSelectedPlaceId(placeId);
             setViewingPlaceId(placeId);
+          }}
+          onBackToLists={() => {
+            setSelectedPlaceId(null);
+            setViewingPlaceId(null);
+            setHoveredPlaceId(null);
+            setShowAllTrips(false);
+            setHideAllMapMarkers(true);
+            pulseFitBounds();
           }}
           onTogglePlaceNumbering={togglePlaceNumbering}
           onHoverPlace={setHoveredPlaceId}
@@ -993,6 +1011,8 @@ function App() {
           onLegTransportChange={(placeId, transport) => {
             handleUpdatePlaceDetails(placeId, { transport });
           }}
+          onStreetViewOpenChange={setIsStreetViewOpen}
+          hideViewsControl={isLoadingSavedAppState}
         />
 
         {/* Hover Preview — driven only by hoveredPlaceId + live trip data */}
@@ -1016,7 +1036,7 @@ function App() {
         </AnimatePresence>
 
         {/* Fit to Trip Button - Positioned to the right of zoom controls */}
-        {selectedTrip && (
+        {selectedTrip && !isStreetViewOpen ? (
           <motion.button
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
@@ -1033,7 +1053,7 @@ function App() {
           >
             <Maximize2 size={18} className="text-white" strokeWidth={2} />
           </motion.button>
-        )}
+        ) : null}
 
       </div>
 
@@ -1064,13 +1084,7 @@ function App() {
               tripColor={selectedTrip.color}
               tripName={selectedTrip.name}
               sidebarWidth={sidebarWidth}
-              transportEditable={selectedTrip.places.findIndex((p) => p.id === viewingPlaceId) > 0}
               onClose={() => {
-                setViewingPlaceId(null);
-                setSelectedPlaceId(null);
-              }}
-              onDelete={() => {
-                handleDeletePlace(viewingPlace.id);
                 setViewingPlaceId(null);
                 setSelectedPlaceId(null);
               }}
@@ -1097,7 +1111,7 @@ function App() {
       </AnimatePresence>
 
       {/* Transport leg markers toggle — same column as chatbot FAB, 5px above it (or above panel when chat is open) */}
-      {selectedTrip && !showAllTrips && !hideAllMapMarkers && (
+      {!isStreetViewOpen && selectedTrip && !showAllTrips && !hideAllMapMarkers && (
         <motion.button
           type="button"
           initial={{ scale: 0 }}
@@ -1131,12 +1145,14 @@ function App() {
         </motion.button>
       )}
 
-      {/* Travel Chatbot */}
-      <TravelChatbot
-        sidebarWidth={sidebarWidth}
-        isPlacePopupOpen={!!viewingPlaceId || appState.isAddPlaceModalOpen || isAuthModalOpen}
-        onOpenChange={setChatbotOpen}
-      />
+      {/* Travel Chatbot (hidden while loading saved app state) */}
+      {!isStreetViewOpen && !isLoadingSavedAppState ? (
+        <TravelChatbot
+          sidebarWidth={sidebarWidth}
+          isPlacePopupOpen={!!viewingPlaceId || appState.isAddPlaceModalOpen || isAuthModalOpen}
+          onOpenChange={setChatbotOpen}
+        />
+      ) : null}
 
       {isLoadingSavedAppState && (
         <div

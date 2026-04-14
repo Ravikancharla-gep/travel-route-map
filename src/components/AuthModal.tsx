@@ -24,6 +24,27 @@ interface AuthModalProps {
   onLogin: (user: User) => void;
 }
 
+const AUTH_BACKDROP_IMAGES = [
+  '/Assets/header-images/1)HawaMahal.png',
+  '/Assets/header-images/2)Jaisalmer.png',
+  '/Assets/header-images/3)Kanyakumari.png',
+  '/Assets/header-images/4)Kedarnath.png',
+  '/Assets/header-images/5)Kerala.png',
+  '/Assets/header-images/6)Kutch.png',
+  '/Assets/header-images/7)Ladakh.png',
+  '/Assets/header-images/8)Manali.png',
+  '/Assets/header-images/9)Munnar.png',
+  '/Assets/header-images/10)Rajasthan.png',
+  '/Assets/header-images/11)RedFort.png',
+  '/Assets/header-images/12)Rishikesh.png',
+  '/Assets/header-images/13)ScubaDiving.png',
+  '/Assets/header-images/14)Skiing.png',
+  '/Assets/header-images/15)SkyDiving.png',
+  '/Assets/header-images/16)Varanasi.png',
+];
+
+const AUTH_BACKDROP_GRID_CELLS = 16;
+
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
@@ -71,11 +92,20 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }) => {
     resetForm();
   };
 
-  // Initialize Google Sign-In
+  // Initialize Google Sign-In. GIS script is async; Maps JS may define `window.google` first without `accounts.id`.
   useEffect(() => {
-    if (isOpen && window.google && googleButtonRef.current && GOOGLE_CLIENT_ID) {
-      window.google.accounts.id.initialize({
+    if (!isOpen || !GOOGLE_CLIENT_ID) return;
+
+    let cancelled = false;
+
+    const mountGsi = (gsi: NonNullable<NonNullable<typeof window.google>['accounts']>['id']) => {
+      const el = googleButtonRef.current;
+      if (!el || cancelled) return;
+
+      gsi.initialize({
         client_id: GOOGLE_CLIENT_ID,
+        // Avoid FedCM for GIS flows that can hang or misbehave with strict third‑party cookie / privacy settings in Chrome.
+        use_fedcm_for_prompt: false,
         callback: async (response: any) => {
           try {
             setIsLoading(true);
@@ -93,34 +123,57 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }) => {
             setIsLoading(false);
           }
         },
-        // Request profile information including picture
         auto_select: false,
         cancel_on_tap_outside: true,
       });
 
-      // Clear previous button and render new one
-      if (googleButtonRef.current) {
-        googleButtonRef.current.innerHTML = '';
-        window.google.accounts.id.renderButton(googleButtonRef.current, {
-          theme: 'outline',
-          size: 'large',
-          width: '100%',
-          text: 'signin_with',
-          type: 'standard',
-        });
-      }
+      el.innerHTML = '';
+      gsi.renderButton(el, {
+        theme: 'outline',
+        size: 'large',
+        width: '100%',
+        text: 'signin_with',
+        type: 'standard',
+      });
+    };
+
+    const gsiNow = window.google?.accounts?.id;
+    if (gsiNow) {
+      mountGsi(gsiNow);
+      return () => {
+        cancelled = true;
+      };
     }
+
+    const intervalId = window.setInterval(() => {
+      const gsi = window.google?.accounts?.id;
+      if (gsi && googleButtonRef.current) {
+        mountGsi(gsi);
+        window.clearInterval(intervalId);
+      }
+    }, 150);
+
+    const timeoutId = window.setTimeout(() => window.clearInterval(intervalId), 20_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
   }, [isOpen, GOOGLE_CLIENT_ID]);
 
   // Alternative: Simple Google button if library not loaded
   const handleGoogleSignIn = async () => {
-    if (!window.google) {
-      setError('Google Sign-In is not available. Please configure VITE_GOOGLE_CLIENT_ID.');
+    const gsi = window.google?.accounts?.id;
+    if (!gsi) {
+      setError(
+        'Google Sign-In is still loading or unavailable. Wait a moment, refresh, or check VITE_GOOGLE_CLIENT_ID.',
+      );
       return;
     }
 
     try {
-      window.google.accounts.id.prompt();
+      gsi.prompt();
     } catch (err: any) {
       setError('Failed to initiate Google Sign-In');
     }
@@ -136,15 +189,31 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 z-[10000]"
-          />
+            className="fixed inset-0 z-[20000]"
+          >
+            <div className="absolute inset-0 grid grid-cols-4 grid-rows-4">
+              {Array.from({ length: AUTH_BACKDROP_GRID_CELLS }).map((_, index) => {
+                const image = AUTH_BACKDROP_IMAGES[index % AUTH_BACKDROP_IMAGES.length];
+                return (
+                  <img
+                    key={`auth-backdrop-cell-${index}`}
+                    src={image}
+                    alt=""
+                    aria-hidden="true"
+                    className="h-full w-full object-cover"
+                  />
+                );
+              })}
+            </div>
+            <div className="absolute inset-0 bg-black/62" />
+          </motion.div>
 
           {/* Modal */}
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed inset-0 flex items-center justify-center z-[10001] p-4"
+            className="fixed inset-0 flex items-center justify-center z-[20001] p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -155,6 +224,8 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }) => {
                 </h2>
                 <button
                   onClick={onClose}
+                  aria-label="Close authentication modal"
+                  title="Close"
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                 >
                   <X size={24} />

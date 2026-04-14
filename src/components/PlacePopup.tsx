@@ -1,18 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Trash2, Save, Camera, X } from 'lucide-react';
-import type { Place, TransportMode } from '../types';
-
-const TRANSPORT_MODES: TransportMode[] = [
-  'Bus',
-  'Train',
-  'Car',
-  'Flight',
-  'Bike',
-  'Walk',
-  'Boat',
-  'Other',
-];
+import { Camera, X } from 'lucide-react';
+import type { Place } from '../types';
 import { compressImage } from '../utils/imageCompression';
 import { fetchPlaceImage } from '../utils/placeImageFetcher';
 
@@ -23,15 +12,11 @@ interface PlacePopupProps {
   mode?: 'create' | 'edit'; // Explicit mode, or auto-detect from place
   sidebarWidth?: number; // Sidebar width for positioning
   onClose?: () => void; // For create mode modal
-  onDelete?: () => void;
   onUpdate?: (updates: {
     name?: string;
     description?: string;
     image?: string;
-    transport?: TransportMode;
   }) => void;
-  /** When true, show transport picker (map leg icon). Only meaningful after the first stop. */
-  transportEditable?: boolean;
   onCreate?: (placeData: { name: string; coords: [number, number]; description?: string; image?: string; isIntermediate?: boolean }) => void;
 }
 
@@ -42,10 +27,8 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
   mode,
   sidebarWidth = 320,
   onClose,
-  onDelete,
   onUpdate,
   onCreate,
-  transportEditable = false,
 }) => {
   // Auto-detect mode if not explicitly provided
   const isCreateMode = mode === 'create' || !place;
@@ -71,9 +54,6 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
   const [editedName, setEditedName] = useState(place?.name || '');
   const [editedDescription, setEditedDescription] = useState(place?.description || '');
   const [editedImage, setEditedImage] = useState(place?.image || ''); // Only stores manually uploaded base64 images
-  const [editedTransport, setEditedTransport] = useState<TransportMode>(
-    (place?.transport as TransportMode) || 'Car',
-  );
   const [isDragOver, setIsDragOver] = useState(false);
   const [fetchedImageUrl, setFetchedImageUrl] = useState<string | null>(null); // For online fetched images (not saved)
 
@@ -83,7 +63,6 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
     setEditedName(place.name);
     setEditedDescription(place.description || '');
     setEditedImage(place.image || '');
-    setEditedTransport((place.transport as TransportMode) || 'Car');
     setFetchedImageUrl(null);
     setIsEditingImage(false);
   }, [place?.id]);
@@ -96,6 +75,13 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
       el.scrollTop = 0;
     });
   }, [place?.id, isCreateMode]);
+
+  const lastAutoSavedRef = useRef<{
+    placeId: string;
+    name: string;
+    description: string;
+    image: string;
+  } | null>(null);
 
   // Auto-fetch image when viewing a place (not in image-edit mode)
   useEffect(() => {
@@ -123,6 +109,53 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
       setFetchedImageUrl(null);
     }
   }, [isCreateMode, place, isEditingImage]);
+
+  // Keep auto-save baseline in sync when switching places.
+  useEffect(() => {
+    if (!place) {
+      lastAutoSavedRef.current = null;
+      return;
+    }
+    lastAutoSavedRef.current = {
+      placeId: place.id,
+      name: place.name || '',
+      description: place.description || '',
+      image: place.image || '',
+    };
+  }, [place?.id]);
+
+  // Edit mode auto-save: persist changes shortly after typing/uploading.
+  useEffect(() => {
+    if (isCreateMode || !onUpdate || !place) return;
+
+    const currentDraft = {
+      placeId: place.id,
+      name: editedName,
+      description: editedDescription,
+      image: editedImage,
+    };
+    const lastSaved = lastAutoSavedRef.current;
+    if (
+      lastSaved &&
+      lastSaved.placeId === currentDraft.placeId &&
+      lastSaved.name === currentDraft.name &&
+      lastSaved.description === currentDraft.description &&
+      lastSaved.image === currentDraft.image
+    ) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      onUpdate({
+        name: editedName.trim(),
+        description: editedDescription.trim() || undefined,
+        image: editedImage || undefined,
+      });
+      lastAutoSavedRef.current = currentDraft;
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isCreateMode, onUpdate, place, editedName, editedDescription, editedImage]);
 
   // Place search for create mode - simple version (India only)
   useEffect(() => {
@@ -246,51 +279,37 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
   }, [formData.name, formData.coords, formData.image, isCreateMode]);
 
   const handleSave = () => {
-    if (isCreateMode) {
-      // Validate that place is selected (has coords and name)
-      if (!formData.name.trim() || formData.coords[0] === 0 || formData.coords[1] === 0) {
-        // If place is not selected, focus on search input
-        searchInputRef.current?.focus();
-        return;
-      }
-      
-      if (onCreate) {
-        // Only save base64 images (manually uploaded) to database
-        // Online fetched URLs (from Unsplash/Wikipedia) are NOT saved
-        const imageToSave = formData.image?.startsWith('data:') ? formData.image : undefined;
-        onCreate({
-          name: formData.name.trim(),
-          coords: formData.coords,
-          description: formData.description || undefined,
-          image: imageToSave,
-          isIntermediate: formData.isIntermediate,
-        });
-        
-        // Reset form and flag after successful creation
-        hasSelectedPlace.current = false;
-        setFormData({
-          name: '',
-          coords: [0, 0],
-          description: '',
-          image: '',
-          isIntermediate: false,
-        });
-        setSearchQuery('');
-        
-        if (onClose) onClose();
-      }
-    } else {
-      if (onUpdate) {
-        // Only save manually uploaded images (base64) to database
-        // fetchedImageUrl is NOT saved - it's fetched on-demand
-        onUpdate({
-          name: editedName.trim(),
-          description: editedDescription.trim() || undefined,
-          image: editedImage || undefined, // Only base64 (manually uploaded) images are saved
-          ...(transportEditable ? { transport: editedTransport } : {}),
-        });
-      }
-      setIsEditingImage(false);
+    // Validate that place is selected (has coords and name)
+    if (!formData.name.trim() || formData.coords[0] === 0 || formData.coords[1] === 0) {
+      // If place is not selected, focus on search input
+      searchInputRef.current?.focus();
+      return;
+    }
+
+    if (onCreate) {
+      // Only save base64 images (manually uploaded) to database
+      // Online fetched URLs (from Unsplash/Wikipedia) are NOT saved
+      const imageToSave = formData.image?.startsWith('data:') ? formData.image : undefined;
+      onCreate({
+        name: formData.name.trim(),
+        coords: formData.coords,
+        description: formData.description || undefined,
+        image: imageToSave,
+        isIntermediate: formData.isIntermediate,
+      });
+
+      // Reset form and flag after successful creation
+      hasSelectedPlace.current = false;
+      setFormData({
+        name: '',
+        coords: [0, 0],
+        description: '',
+        image: '',
+        isIntermediate: false,
+      });
+      setSearchQuery('');
+
+      if (onClose) onClose();
     }
   };
 
@@ -316,6 +335,7 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
       } else {
         setEditedImage(compressedDataUrl); // This is base64, will be saved
         setFetchedImageUrl(null); // Clear fetched URL when user uploads their own image
+        setIsEditingImage(false);
       }
     } catch (error) {
       console.error('Failed to compress image:', error);
@@ -328,6 +348,7 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
         } else {
           setEditedImage(result); // Save base64
           setFetchedImageUrl(null); // Clear fetched URL
+          setIsEditingImage(false);
         }
       };
       reader.readAsDataURL(file);
@@ -683,17 +704,6 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
                 >
                   <Camera size={22} strokeWidth={2} />
                 </button>
-                {onDelete && (
-                  <button
-                    type="button"
-                    onClick={onDelete}
-                    className="rounded-md p-2 text-white transition-colors hover:bg-white/20 dark:hover:bg-gray-700/30"
-                    title={`Delete ${currentName}`}
-                    aria-label={`Delete ${currentName}`}
-                  >
-                    <Trash2 size={22} strokeWidth={2} />
-                  </button>
-                )}
               </div>
             </div>
           ) : (
@@ -729,31 +739,6 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
           )}
         </div>
 
-        {!isCreateMode && transportEditable && useDarkPlacePanel && (
-          <div className="mb-3">
-            <label
-              htmlFor="place-popup-transport"
-              className="mb-1.5 block text-xs font-medium text-white/70"
-            >
-              Travel to this stop (map icon)
-            </label>
-            <select
-              id="place-popup-transport"
-              value={editedTransport}
-              onChange={(e) => setEditedTransport(e.target.value as TransportMode)}
-              className="w-full rounded-lg border border-white/25 bg-white/10 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/35 [&>option]:bg-gray-900 [&>option]:text-white"
-              title="How you travel from the previous stop — updates the icon on the map"
-              aria-label="Transport mode to this stop"
-            >
-              {TRANSPORT_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         {/* Save / Add */}
         {isCreateMode && (
           <div>
@@ -770,18 +755,6 @@ const PlacePopup: React.FC<PlacePopupProps> = ({
               <span>Add Place</span>
             </button>
           </div>
-        )}
-        {!isCreateMode && onUpdate && (
-          <button
-            type="button"
-            onClick={handleSave}
-            className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold text-white shadow-md transition-opacity hover:opacity-90"
-            style={{ backgroundColor: tripColor }}
-            title="Save changes"
-          >
-            <Save size={18} />
-            <span>Save changes</span>
-          </button>
         )}
       </div>
     </div>
